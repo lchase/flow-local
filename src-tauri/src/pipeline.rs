@@ -102,15 +102,16 @@ impl Pipeline {
         }
         *self.target_app.lock().unwrap() = frontmost_app();
 
+        // Instant feedback: show the overlay before the mic stream spins up.
+        emit_state(app, "recording", None);
         let recorder = app.state::<Recorder>();
         match recorder.start() {
             Ok(()) => {
                 *self.stage.lock().unwrap() = Stage::Recording;
-                emit_state(app, "recording", None);
             }
             Err(e) => {
                 log::error!("recording start failed: {e}");
-                emit_state(app, "error", Some(format!("Mic error: {e}")));
+                self.finish(app, Some(format!("Mic error: {e}")));
             }
         }
     }

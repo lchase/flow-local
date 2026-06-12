@@ -11,6 +11,7 @@ use rubato::{FftFixedIn, Resampler};
 pub const TARGET_SAMPLE_RATE: usize = 16_000;
 
 enum WorkerMsg {
+    Started,
     Done(Vec<f32>, u32),
     InitError(String),
 }
@@ -97,6 +98,7 @@ impl Recorder {
                     return;
                 }
             };
+            let _ = msg_tx.send(WorkerMsg::Started);
 
             while !stop_flag.load(Ordering::SeqCst) {
                 std::thread::sleep(std::time::Duration::from_millis(10));
@@ -107,19 +109,17 @@ impl Recorder {
             let _ = msg_tx.send(WorkerMsg::Done(collected, sample_rate));
         });
 
-        // Surface device/permission errors immediately rather than at stop().
-        match msg_rx.recv_timeout(std::time::Duration::from_millis(1500)) {
+        // Wait for the worker to confirm the stream is live (or fail fast).
+        match msg_rx.recv_timeout(std::time::Duration::from_secs(3)) {
+            Ok(WorkerMsg::Started) => {}
             Ok(WorkerMsg::InitError(e)) => {
                 let _ = handle.join();
                 return Err(anyhow!(e));
             }
             Ok(WorkerMsg::Done(..)) => unreachable!("worker finished before stop"),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                // No error within the window: stream is up and running.
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err(e) => {
                 let _ = handle.join();
-                return Err(anyhow!("audio worker died during init"));
+                return Err(anyhow!("audio worker did not start: {e}"));
             }
         }
 
@@ -140,6 +140,7 @@ impl Recorder {
         match msg {
             WorkerMsg::Done(samples, rate) => resample_to_16k(samples, rate as usize),
             WorkerMsg::InitError(e) => Err(anyhow!(e)),
+            WorkerMsg::Started => Err(anyhow!("unexpected Started message at stop")),
         }
     }
 }
