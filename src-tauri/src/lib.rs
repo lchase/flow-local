@@ -184,6 +184,11 @@ fn register_hotkey(app: &AppHandle, binding: &str) -> anyhow::Result<()> {
 }
 
 fn show_settings_window(app: &AppHandle) {
+    // Become a regular app while settings are open: dock icon + focusable
+    // window. The tray icon alone is unreliable (hidden by the notch when the
+    // menu bar is full).
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();
@@ -233,6 +238,19 @@ pub fn run() {
                 })
                 .build(),
         )
+        .on_window_event(|window, event| {
+            // Closing settings hides it and drops back to background-app mode.
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    #[cfg(target_os = "macos")]
+                    let _ = window
+                        .app_handle()
+                        .set_activation_policy(tauri::ActivationPolicy::Accessory);
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_settings,
             set_settings,
@@ -253,10 +271,8 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
 
-            // Menu-bar app: no dock icon.
-            #[cfg(target_os = "macos")]
-            let _ = handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
-
+            // Launches as a regular app so the settings window is visible;
+            // closing the window switches to Accessory (menu-bar only) mode.
             let store = SettingsStore::load(&handle)?;
             let hotkey = store.get().hotkey.clone();
             let retention = store.get().history_retention.clone();
