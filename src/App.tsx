@@ -71,6 +71,45 @@ const NAV: { id: Page; label: string; icon: React.ReactNode }[] = [
   },
 ];
 
+/** Live dictation state: what pressing the hotkey would do right now. */
+function StatusChip({ pipeline, modelReady }: { pipeline: PipelineEvent; modelReady: boolean }) {
+  const LABELS: Record<string, string> = {
+    recording: "Listening…",
+    transcribing: "Transcribing…",
+    cleaning: "Polishing…",
+    pasting: "Inserting…",
+  };
+  let dot: string;
+  let label: string;
+  let tone: string;
+  if (pipeline.state === "error") {
+    dot = "bg-red-500";
+    label = pipeline.detail ?? "Error";
+    tone = "text-red-600";
+  } else if (pipeline.state !== "idle") {
+    dot = "animate-pulse bg-(--color-accent)";
+    label = LABELS[pipeline.state] ?? pipeline.state;
+    tone = "text-(--color-accent)";
+  } else if (!modelReady) {
+    dot = "animate-pulse bg-amber-400";
+    label = "Loading speech model…";
+    tone = "text-(--color-ink-soft)";
+  } else {
+    dot = "bg-(--color-accent)";
+    label = "Ready to dictate";
+    tone = "text-(--color-ink-soft)";
+  }
+  return (
+    <div
+      className={`mb-3 flex items-center gap-2 rounded-lg border border-(--color-line) bg-(--color-card) px-3 py-2 text-xs ${tone}`}
+      title="Live dictation status — mirrors the on-screen pill while you dictate"
+    >
+      <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />
+      <span className="truncate">{label}</span>
+    </div>
+  );
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>("home");
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -173,22 +212,8 @@ export default function App() {
         </nav>
 
         <div className="mt-auto px-5 pb-5">
-          <div
-            className={`mb-3 flex items-center gap-2 rounded-lg border border-(--color-line) bg-(--color-card) px-3 py-2 text-xs ${
-              pipeline.state === "idle" ? "text-(--color-ink-soft)" : "text-(--color-accent)"
-            }`}
-          >
-            <span
-              className={`h-2 w-2 rounded-full ${
-                pipeline.state === "idle"
-                  ? "bg-stone-300"
-                  : pipeline.state === "error"
-                    ? "bg-red-500"
-                    : "animate-pulse bg-(--color-accent)"
-              }`}
-            />
-            <span className="capitalize">{pipeline.state === "idle" ? "Ready" : pipeline.state}</span>
-          </div>
+          <StatusChip pipeline={pipeline} modelReady={sttStatus?.loaded ?? false} />
+
           <p className="text-[11px] leading-relaxed text-(--color-ink-soft)">
             v0.1.0 · 100% on-device.
             <br />
