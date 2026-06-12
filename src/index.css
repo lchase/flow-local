@@ -1,4 +1,20 @@
+@import "@fontsource-variable/bricolage-grotesque";
+@import "@fontsource-variable/instrument-sans";
 @import "tailwindcss";
+
+@theme {
+  --font-display: "Bricolage Grotesque Variable", "Avenir Next", sans-serif;
+  --font-sans: "Instrument Sans Variable", "Helvetica Neue", sans-serif;
+
+  --color-paper: #f7f5f1;
+  --color-card: #fffefb;
+  --color-ink: #1f1c18;
+  --color-ink-soft: #6f6a61;
+  --color-line: #e7e2d9;
+  --color-accent: #0d6e5f;
+  --color-accent-soft: #e3efe9;
+  --color-amber-soft: #fdf3e3;
+}
 
 html,
 body,
@@ -7,6 +23,67 @@ body,
 }
 
 body {
-  background: transparent;
+  background: transparent; /* overlay window needs this */
   -webkit-font-smoothing: antialiased;
+  font-family: var(--font-sans);
+}
+
+/* Paper shell with a whisper of grain (main window only) */
+.shell {
+  background:
+    radial-gradient(1200px 500px at 85% -10%, #efe9dd 0%, transparent 60%),
+    var(--color-paper);
+  position: relative;
+}
+.shell::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.35;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.025 0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Staggered page-load reveal */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.rise {
+  animation: rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.rise-1 { animation-delay: 0.04s; }
+.rise-2 { animation-delay: 0.1s; }
+.rise-3 { animation-delay: 0.16s; }
+.rise-4 { animation-delay: 0.22s; }
+
+kbd {
+  font-family: var(--font-sans);
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0.1em 0.45em;
+  text-align: center;
+  border: 1px solid var(--color-line);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  background: var(--color-card);
+  font-size: 0.85em;
+  color: var(--color-ink);
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.03);
+}
+
+select,
+input[type="text"],
+input:not([type]),
+textarea {
+  accent-color: var(--color-accent);
+}
+input[type="checkbox"] {
+  accent-color: var(--color-accent);
 }
