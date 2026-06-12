@@ -55,7 +55,22 @@ The build is currently **unsigned/un-notarized**, so Gatekeeper will block it on
 - Right-click the app → **Open** → Open (once), or
 - `xattr -dr com.apple.quarantine "/Applications/Flow Local.app"`
 
-That's fine for demos to a few colleagues. For real internal distribution you'd want:
+That's fine for demos to a few colleagues.
+
+**Homebrew tap (recommended for company-internal distribution).** A private tap sidesteps the Gatekeeper dance — `--no-quarantine` installs skip the quarantine attribute, so even unsigned builds open normally:
+
+1. Create a repo named `homebrew-tools` under the org and copy `packaging/homebrew/flow-local.rb` into `Casks/`
+2. Host the dmg somewhere URL-accessible (GitHub Releases on the app repo is easiest), fill in `url` and `sha256` (`shasum -a 256 <dmg>`)
+3. Colleagues run:
+   ```sh
+   brew tap <org>/tools
+   brew install --cask --no-quarantine flow-local
+   ```
+4. Releases become: build → upload dmg → bump `version`/`sha256` in the cask → users `brew upgrade --cask flow-local`
+
+This requires the artifact to be hosted somewhere, so it kicks in once you put the project in a repo. Until then, AirDrop/Slack the dmg with the right-click → Open instruction.
+
+For fully polished distribution (no `--no-quarantine` needed, works for non-brew users too):
 
 1. An **Apple Developer ID** certificate (Apple Developer Program, $99/yr — possibly via the company's Apple Business account)
 2. Set `bundle.macOS.signingIdentity` in `src-tauri/tauri.conf.json` and configure notarization (`APPLE_ID`/`APPLE_PASSWORD` or App Store Connect API key env vars — `tauri build` handles submission)
