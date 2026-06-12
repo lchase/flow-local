@@ -242,15 +242,12 @@ pub fn run() {
                 .build(),
         )
         .on_window_event(|window, event| {
-            // Closing settings hides it and drops back to background-app mode.
+            // Closing settings hides it; the app stays alive (and in the Dock,
+            // since a full menu bar can push the tray icon off-screen).
             if window.label() == "main" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
                     let _ = window.hide();
-                    #[cfg(target_os = "macos")]
-                    let _ = window
-                        .app_handle()
-                        .set_activation_policy(tauri::ActivationPolicy::Accessory);
                 }
             }
         })
@@ -307,6 +304,14 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Dock icon click with no visible window → reopen settings.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                show_settings_window(app);
+            }
+            let _ = (app, &event);
+        });
 }
