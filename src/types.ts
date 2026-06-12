@@ -1,3 +1,10 @@
+export type ProfileMode = "code" | "messaging" | "email" | "prose";
+
+export interface AppProfile {
+  bundle_id: string;
+  mode: ProfileMode;
+}
+
 export interface AppSettings {
   hotkey: string;
   activation_mode: "push_to_talk" | "toggle";
@@ -5,6 +12,47 @@ export interface AppSettings {
   ollama_url: string;
   ollama_model: string;
   dictionary: string[];
+  app_profiles: AppProfile[];
+  history_retention: "forever" | "24h" | "never";
+}
+
+export interface HistoryEntry {
+  id: number;
+  ts: string;
+  app_name: string | null;
+  app_bundle_id: string | null;
+  raw_text: string;
+  final_text: string;
+  cleaned: boolean;
+  audio_seconds: number;
+  stt_ms: number;
+  llm_ms: number | null;
+  words: number;
+}
+
+export interface AppCount {
+  app_name: string;
+  dictations: number;
+  words: number;
+}
+
+export interface Stats {
+  total_dictations: number;
+  total_words: number;
+  total_audio_seconds: number;
+  avg_wpm: number;
+  minutes_saved: number;
+  streak_days: number;
+  distinct_apps: number;
+  days_active: number;
+  per_app: AppCount[];
+}
+
+export interface Achievement {
+  id: string;
+  title: string;
+  description: string;
+  unlocked_at: string | null;
 }
 
 export interface PipelineEvent {

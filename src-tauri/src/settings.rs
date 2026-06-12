@@ -5,6 +5,13 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct AppProfile {
+    pub bundle_id: String,
+    /// "code" | "messaging" | "email" | "prose"
+    pub mode: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
@@ -18,6 +25,11 @@ pub struct AppSettings {
     pub ollama_model: String,
     /// Words/names the cleanup prompt should know how to spell.
     pub dictionary: Vec<String>,
+    /// Per-app output style overrides; unlisted apps fall back to built-in
+    /// defaults (see cleanup::builtin_mode), then to "prose".
+    pub app_profiles: Vec<AppProfile>,
+    /// "forever" | "24h" | "never" — how long dictation history is kept.
+    pub history_retention: String,
 }
 
 impl Default for AppSettings {
@@ -27,8 +39,10 @@ impl Default for AppSettings {
             activation_mode: "push_to_talk".to_string(),
             cleanup_enabled: true,
             ollama_url: "http://localhost:11434".to_string(),
-            ollama_model: "qwen3:4b-instruct-2507".to_string(),
+            ollama_model: "qwen3:4b-instruct".to_string(),
             dictionary: Vec::new(),
+            app_profiles: Vec::new(),
+            history_retention: "forever".to_string(),
         }
     }
 }

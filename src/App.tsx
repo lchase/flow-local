@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  Achievement,
+  AppProfile,
   AppSettings,
   DictationResult,
   DownloadProgress,
@@ -9,6 +11,8 @@ import type {
   PipelineEvent,
   SttModelStatus,
 } from "./types";
+import HistoryTab from "./tabs/HistoryTab";
+import StatsTab from "./tabs/StatsTab";
 
 function formatBytes(n: number) {
   return `${(n / 1024 / 1024).toFixed(0)} MB`;
@@ -30,6 +34,8 @@ export default function App() {
   const [pipeline, setPipeline] = useState<PipelineEvent>({ state: "idle", detail: null });
   const [lastResult, setLastResult] = useState<DictationResult | null>(null);
   const [dictionaryText, setDictionaryText] = useState("");
+  const [tab, setTab] = useState<"settings" | "history" | "stats">("settings");
+  const [toast, setToast] = useState<Achievement | null>(null);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -61,6 +67,12 @@ export default function App() {
       }),
       listen<PipelineEvent>("pipeline-state", (e) => setPipeline(e.payload)),
       listen<DictationResult>("dictation-complete", (e) => setLastResult(e.payload)),
+      listen<Achievement[]>("achievements-unlocked", (e) => {
+        if (e.payload.length > 0) {
+          setToast(e.payload[0]);
+          setTimeout(() => setToast(null), 5000);
+        }
+      }),
     ];
     return () => {
       clearInterval(poll);
@@ -113,6 +125,25 @@ export default function App() {
           </span>
         </header>
 
+        <nav className="flex gap-1 rounded-lg bg-neutral-900 p-1">
+          {(["settings", "history", "stats"] as const).map((t) => (
+            <button
+              key={t}
+              className={`flex-1 rounded-md px-3 py-1.5 text-sm capitalize ${
+                tab === t ? "bg-neutral-700 text-white" : "text-neutral-400 hover:text-neutral-200"
+              }`}
+              onClick={() => setTab(t)}
+            >
+              {t}
+            </button>
+          ))}
+        </nav>
+
+        {tab === "history" && <HistoryTab />}
+        {tab === "stats" && <StatsTab />}
+
+        {tab === "settings" && (
+        <>
         {/* Status */}
         <section className="space-y-3 rounded-xl bg-neutral-900 p-4">
           <h2 className="text-sm font-semibold text-neutral-300">Status</h2>
@@ -245,6 +276,81 @@ export default function App() {
             />
           </label>
 
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-neutral-400">
+                Per-app style (code editors, terminals, Slack and Mail are detected automatically)
+              </span>
+              <button
+                className="rounded bg-neutral-800 px-2 py-0.5 text-xs hover:bg-neutral-700"
+                onClick={() =>
+                  update({
+                    app_profiles: [
+                      ...settings.app_profiles,
+                      {
+                        bundle_id: lastResult?.app_bundle_id ?? "",
+                        mode: "prose",
+                      },
+                    ],
+                  })
+                }
+              >
+                + Add override
+              </button>
+            </div>
+            {settings.app_profiles.map((p, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input
+                  className="flex-1 rounded bg-neutral-800 px-2 py-1 text-sm"
+                  value={p.bundle_id}
+                  placeholder="bundle id, e.g. com.microsoft.VSCode"
+                  onChange={(e) => {
+                    const next = [...settings.app_profiles];
+                    next[i] = { ...p, bundle_id: e.target.value };
+                    update({ app_profiles: next });
+                  }}
+                />
+                <select
+                  className="rounded bg-neutral-800 px-2 py-1 text-sm"
+                  value={p.mode}
+                  onChange={(e) => {
+                    const next = [...settings.app_profiles];
+                    next[i] = { ...p, mode: e.target.value as AppProfile["mode"] };
+                    update({ app_profiles: next });
+                  }}
+                >
+                  <option value="code">Code</option>
+                  <option value="messaging">Messaging</option>
+                  <option value="email">Email</option>
+                  <option value="prose">Prose</option>
+                </select>
+                <button
+                  className="rounded bg-neutral-800 px-2 py-1 text-xs text-red-300 hover:bg-neutral-700"
+                  onClick={() =>
+                    update({ app_profiles: settings.app_profiles.filter((_, j) => j !== i) })
+                  }
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-neutral-400">Keep history</span>
+            <select
+              className="rounded bg-neutral-800 px-2 py-1"
+              value={settings.history_retention}
+              onChange={(e) =>
+                update({ history_retention: e.target.value as AppSettings["history_retention"] })
+              }
+            >
+              <option value="forever">Forever</option>
+              <option value="24h">24 hours</option>
+              <option value="never">Don't store</option>
+            </select>
+          </label>
+
           <div className="flex items-center gap-3">
             <button
               className="rounded bg-sky-600 px-4 py-1.5 text-sm font-medium hover:bg-sky-500 disabled:opacity-40"
@@ -256,9 +362,11 @@ export default function App() {
             {saveError && <span className="text-xs text-red-400">{saveError}</span>}
           </div>
         </section>
+        </>
+        )}
 
         {/* Last dictation */}
-        {lastResult && (
+        {lastResult && tab === "settings" && (
           <section className="space-y-2 rounded-xl bg-neutral-900 p-4">
             <h2 className="text-sm font-semibold text-neutral-300">Last dictation</h2>
             <p className="text-xs text-neutral-500">
@@ -276,6 +384,13 @@ export default function App() {
           </section>
         )}
       </div>
+
+      {toast && (
+        <div className="fixed bottom-4 right-4 max-w-xs rounded-xl bg-amber-900/95 p-4 text-amber-50 shadow-2xl">
+          <div className="text-sm font-semibold">🏆 {toast.title}</div>
+          <div className="mt-0.5 text-xs opacity-90">{toast.description}</div>
+        </div>
+      )}
     </div>
   );
 }

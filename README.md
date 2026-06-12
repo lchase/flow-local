@@ -6,7 +6,7 @@ Local-first dictation for macOS, in the spirit of [Wispr Flow](https://wisprflow
 
 - **Shell**: Tauri v2 — Rust core (audio → STT → LLM cleanup → paste injection), React + TypeScript + Tailwind UI
 - **STT**: Parakeet TDT 0.6B v3 (int8 ONNX) via [`transcribe-rs`](https://crates.io/crates/transcribe-rs); auto-downloaded on first run (~456 MB)
-- **Cleanup**: Ollama `/api/chat`, default model `qwen3:4b-instruct-2507`, configurable
+- **Cleanup**: Ollama `/api/chat`, default model `qwen3:4b-instruct`, configurable
 - **Injection**: clipboard save → paste (Cmd+V via `enigo`) → clipboard restore
 
 ## Prerequisites
@@ -15,7 +15,7 @@ Local-first dictation for macOS, in the spirit of [Wispr Flow](https://wisprflow
 - [Rust](https://rustup.rs), Node 20+, pnpm
 - [Ollama](https://ollama.com) running locally with a small instruct model pulled:
   ```sh
-  ollama pull qwen3:4b-instruct-2507
+  ollama pull qwen3:4b-instruct
   ```
 
 ## Develop

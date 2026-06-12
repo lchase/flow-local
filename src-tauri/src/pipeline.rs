@@ -142,6 +142,7 @@ impl Pipeline {
             match outcome {
                 Ok(result) => {
                     let _ = app.emit("dictation-complete", &result);
+                    record_history(&app, &result);
                     pipeline.finish(&app, None);
                 }
                 Err(e) => {
@@ -166,6 +167,23 @@ impl Pipeline {
             }
             None => emit_state(app, "idle", None),
         }
+    }
+}
+
+fn record_history(app: &AppHandle, result: &DictationResult) {
+    let settings = app.state::<SettingsStore>().get();
+    if settings.history_retention == "never" {
+        return;
+    }
+    let store = app.state::<crate::store::Store>();
+    match store.record_dictation(result) {
+        Ok(newly_unlocked) => {
+            if !newly_unlocked.is_empty() {
+                let _ = app.emit("achievements-unlocked", &newly_unlocked);
+            }
+            let _ = store.apply_retention(&settings.history_retention);
+        }
+        Err(e) => log::error!("failed to record history: {e}"),
     }
 }
 

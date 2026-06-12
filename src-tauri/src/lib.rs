@@ -4,6 +4,7 @@ mod context;
 mod inject;
 mod pipeline;
 mod settings;
+mod store;
 mod stt;
 
 use tauri::menu::{Menu, MenuItem};
@@ -82,6 +83,39 @@ fn mic_level(recorder: tauri::State<Recorder>) -> f32 {
     recorder.current_level()
 }
 
+#[tauri::command]
+fn get_history(
+    store: tauri::State<store::Store>,
+    search: Option<String>,
+    limit: Option<i64>,
+) -> Result<Vec<store::HistoryEntry>, String> {
+    store
+        .history(search, limit.unwrap_or(100))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_history_entry(store: tauri::State<store::Store>, id: i64) -> Result<(), String> {
+    store.delete_entry(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn clear_history(store: tauri::State<store::Store>) -> Result<(), String> {
+    store.clear_history().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_stats(store: tauri::State<store::Store>) -> Result<store::Stats, String> {
+    store.stats().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_achievements(
+    store: tauri::State<store::Store>,
+) -> Result<Vec<store::Achievement>, String> {
+    store.achievements().map_err(|e| e.to_string())
+}
+
 fn register_hotkey(app: &AppHandle, binding: &str) -> anyhow::Result<()> {
     let shortcuts = app.global_shortcut();
     shortcuts.unregister_all()?;
@@ -147,6 +181,11 @@ pub fn run() {
             check_accessibility,
             request_accessibility,
             mic_level,
+            get_history,
+            delete_history_entry,
+            clear_history,
+            get_stats,
+            get_achievements,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -157,7 +196,12 @@ pub fn run() {
 
             let store = SettingsStore::load(&handle)?;
             let hotkey = store.get().hotkey.clone();
+            let retention = store.get().history_retention.clone();
             app.manage(store);
+
+            let db = store::Store::open(&handle)?;
+            let _ = db.apply_retention(&retention);
+            app.manage(db);
             app.manage(Recorder::new());
             app.manage(Transcriber::new());
             app.manage(Injector::new());
