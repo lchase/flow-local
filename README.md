@@ -33,11 +33,41 @@ On first run:
 
 Then hold **⌥ Space** in any app, speak, and release.
 
-## Build
+## Build a distributable app
+
+One-time build prerequisites: `brew install cmake` (whisper.cpp) and `rustup component add rustfmt`.
 
 ```sh
 pnpm tauri build
 ```
+
+Artifacts land in `src-tauri/target/release/bundle/`:
+
+- `macos/Flow Local.app` — drag into `/Applications`
+- `dmg/Flow Local_0.1.0_aarch64.dmg` — shareable disk image
+
+The first launch on any machine downloads the Parakeet model (~456 MB) and prompts for Microphone + Accessibility. **Ollama is a separate install** on each machine (`brew install ollama`, then `ollama pull qwen3:4b-instruct`) — without it the app still works, inserting raw transcripts.
+
+### Sharing inside the company (demo-stage)
+
+The build is currently **unsigned/un-notarized**, so Gatekeeper will block it on other Macs with "can't be opened". Recipients can bypass it one of two ways:
+
+- Right-click the app → **Open** → Open (once), or
+- `xattr -dr com.apple.quarantine "/Applications/Flow Local.app"`
+
+That's fine for demos to a few colleagues. For real internal distribution you'd want:
+
+1. An **Apple Developer ID** certificate (Apple Developer Program, $99/yr — possibly via the company's Apple Business account)
+2. Set `bundle.macOS.signingIdentity` in `src-tauri/tauri.conf.json` and configure notarization (`APPLE_ID`/`APPLE_PASSWORD` or App Store Connect API key env vars — `tauri build` handles submission)
+3. Optionally the tauri-plugin-updater for auto-updates from an internal URL
+
+Apple Silicon only as configured; Intel Macs would need a `--target universal-apple-darwin` build.
+
+## Demo script (2 minutes)
+
+1. Open Slack or TextEdit, hold **⌥Space**: "um so basically let's meet at 2 actually 3pm thanks so much for um setting this up" → release. Filler words gone, correction applied.
+2. Open VS Code, hold **⌥Space**: "set the user settings object to null" → inserts `userSettings = null` (code mode kicked in from the frontmost app).
+3. Show the **History** tab (raw vs. polished diff), **Home** stats/achievements, and the point that sells it: **everything ran on this Mac — no audio or text left the machine.**
 
 ## Permissions used
 
