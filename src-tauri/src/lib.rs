@@ -39,13 +39,69 @@ fn set_settings(
 
 #[tauri::command]
 fn stt_model_status(app: AppHandle, transcriber: tauri::State<Transcriber>) -> serde_json::Value {
-    let downloaded = stt::model_path(&app).map(|p| p.exists()).unwrap_or(false);
+    let configured = app.state::<SettingsStore>().get().stt_model_id;
+    let loaded_id = transcriber.loaded_model_id();
+    let models: Vec<serde_json::Value> = stt::MODELS
+        .iter()
+        .map(|m| {
+            let downloaded = stt::artifact_path(&app, m).map(|p| p.exists()).unwrap_or(false);
+            serde_json::json!({
+                "id": m.id,
+                "name": m.name,
+                "description": m.description,
+                "size_mb": m.size_mb,
+                "downloaded": downloaded,
+            })
+        })
+        .collect();
+    let model_name = stt::model_info(&configured).map(|m| m.name).unwrap_or("?");
     serde_json::json!({
-        "model_id": stt::PARAKEET_V3.id,
-        "model_name": stt::PARAKEET_V3.name,
-        "downloaded": downloaded,
-        "loaded": transcriber.is_loaded(),
+        "model_id": configured,
+        "model_name": model_name,
+        "downloaded": stt::model_info(&configured)
+            .and_then(|m| stt::artifact_path(&app, m).ok())
+            .map(|p| p.exists())
+            .unwrap_or(false),
+        "loaded": loaded_id.as_deref() == Some(configured.as_str()),
+        "models": models,
     })
+}
+
+#[tauri::command]
+fn set_stt_model(
+    app: AppHandle,
+    store: tauri::State<SettingsStore>,
+    model_id: String,
+) -> Result<(), String> {
+    if stt::model_info(&model_id).is_none() {
+        return Err(format!("unknown model '{model_id}'"));
+    }
+    let mut settings = store.get();
+    settings.stt_model_id = model_id.clone();
+    store.set(settings).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = stt::ensure_model_ready(app.clone(), &model_id).await {
+            log::error!("STT model switch failed: {e}");
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn get_autostart(app: AppHandle) -> bool {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let autolaunch = app.autolaunch();
+    if enabled {
+        autolaunch.enable().map_err(|e| e.to_string())
+    } else {
+        autolaunch.disable().map_err(|e| e.to_string())
+    }
 }
 
 #[tauri::command]
@@ -164,6 +220,10 @@ pub fn run() {
         )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -177,6 +237,9 @@ pub fn run() {
             get_settings,
             set_settings,
             stt_model_status,
+            set_stt_model,
+            get_autostart,
+            set_autostart,
             ollama_status,
             check_accessibility,
             request_accessibility,
@@ -213,7 +276,8 @@ pub fn run() {
             // Download/load the STT model and warm the Ollama model in the background.
             let bg = handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = stt::ensure_model_ready(bg.clone()).await {
+                let model_id = bg.state::<SettingsStore>().get().stt_model_id;
+                if let Err(e) = stt::ensure_model_ready(bg.clone(), &model_id).await {
                     log::error!("STT model setup failed: {e}");
                 }
                 let settings = bg.state::<SettingsStore>().get();

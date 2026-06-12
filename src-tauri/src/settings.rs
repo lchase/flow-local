@@ -19,6 +19,8 @@ pub struct AppSettings {
     pub hotkey: String,
     /// "push_to_talk" (hold) or "toggle" (press to start/stop).
     pub activation_mode: String,
+    /// Which STT model to use (see stt::MODELS).
+    pub stt_model_id: String,
     /// Run the transcript through Ollama before pasting.
     pub cleanup_enabled: bool,
     pub ollama_url: String,
@@ -37,6 +39,7 @@ impl Default for AppSettings {
         Self {
             hotkey: "alt+space".to_string(),
             activation_mode: "push_to_talk".to_string(),
+            stt_model_id: crate::stt::DEFAULT_MODEL_ID.to_string(),
             cleanup_enabled: true,
             ollama_url: "http://localhost:11434".to_string(),
             ollama_model: "qwen3:4b-instruct".to_string(),

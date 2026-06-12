@@ -36,6 +36,7 @@ export default function App() {
   const [dictionaryText, setDictionaryText] = useState("");
   const [tab, setTab] = useState<"settings" | "history" | "stats">("settings");
   const [toast, setToast] = useState<Achievement | null>(null);
+  const [autostart, setAutostart] = useState(false);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -57,6 +58,7 @@ export default function App() {
       setSettings(s);
       setDictionaryText(s.dictionary.join(", "));
     });
+    invoke<boolean>("get_autostart").then(setAutostart);
     refreshStatus();
     const poll = setInterval(refreshStatus, 5000);
 
@@ -192,6 +194,39 @@ export default function App() {
         {/* Settings */}
         <section className="space-y-4 rounded-xl bg-neutral-900 p-4">
           <h2 className="text-sm font-semibold text-neutral-300">Settings</h2>
+
+          <div className="grid grid-cols-2 gap-4">
+            <label className="space-y-1 text-sm">
+              <span className="text-neutral-400">Speech model</span>
+              <select
+                className="w-full rounded bg-neutral-800 px-2 py-1.5"
+                value={settings.stt_model_id}
+                onChange={async (e) => {
+                  const id = e.target.value;
+                  setSettings({ ...settings, stt_model_id: id });
+                  await invoke("set_stt_model", { modelId: id });
+                  refreshStatus();
+                }}
+              >
+                {(sttStatus?.models ?? []).map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} ({m.size_mb} MB{m.downloaded ? "" : ", will download"})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-end gap-2 pb-1.5 text-sm">
+              <input
+                type="checkbox"
+                checked={autostart}
+                onChange={async (e) => {
+                  setAutostart(e.target.checked);
+                  await invoke("set_autostart", { enabled: e.target.checked });
+                }}
+              />
+              <span>Launch at login</span>
+            </label>
+          </div>
 
           <div className="grid grid-cols-2 gap-4">
             <label className="space-y-1 text-sm">

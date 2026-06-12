@@ -8,6 +8,7 @@ export interface AppProfile {
 export interface AppSettings {
   hotkey: string;
   activation_mode: "push_to_talk" | "toggle";
+  stt_model_id: string;
   cleanup_enabled: boolean;
   ollama_url: string;
   ollama_model: string;
@@ -79,11 +80,20 @@ export interface DownloadProgress {
   error: string | null;
 }
 
+export interface SttModelChoice {
+  id: string;
+  name: string;
+  description: string;
+  size_mb: number;
+  downloaded: boolean;
+}
+
 export interface SttModelStatus {
   model_id: string;
   model_name: string;
   downloaded: boolean;
   loaded: boolean;
+  models: SttModelChoice[];
 }
 
 export interface OllamaStatus {
