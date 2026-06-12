@@ -200,8 +200,11 @@ fn setup_tray(app: &AppHandle) -> anyhow::Result<()> {
     let quit_item = MenuItem::with_id(app, "quit", "Quit Flow Local", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&settings_item, &quit_item])?;
 
+    // Monochrome template image: macOS renders it from the alpha channel and
+    // auto-adapts to light/dark menu bars. A colorful icon renders blank here.
+    let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?;
     TrayIconBuilder::with_id("main-tray")
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(tray_icon)
         .icon_as_template(true)
         .tooltip("Flow Local")
         .menu(&menu)
