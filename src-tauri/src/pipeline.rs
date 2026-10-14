@@ -414,7 +414,8 @@ async fn process(
         })
         .await??
     };
-    log::info!("STT ({stt_ms}ms): {raw_text}");
+    // Never log dictated text: the log file persists on disk.
+    log::info!("STT ({stt_ms}ms): {} chars", raw_text.chars().count());
 
     // Streaming VAD found nothing — retry with whole-utterance transcription,
     // which doesn't depend on `STREAMING_VAD_RMS_THRESHOLD`. Success means
@@ -437,7 +438,10 @@ async fn process(
                 )
                 .await??;
                 if !retried_text.is_empty() {
-                    log::info!("whole-utterance retry recovered: {retried_text}");
+                    log::info!(
+                        "whole-utterance retry recovered: {} chars",
+                        retried_text.chars().count()
+                    );
                     calibrate_mic_threshold(app, rms);
                 }
                 retried_text
@@ -466,10 +470,10 @@ async fn process(
         match cleanup::clean_transcript(&settings, target_app.as_ref(), &transcript).await {
             Ok(result) => {
                 log::info!(
-                    "cleanup ({}ms, {:.0} tok/s): {}",
+                    "cleanup ({}ms, {:.0} tok/s): {} chars",
                     result.llm_ms,
                     result.tokens_per_sec.unwrap_or(0.0),
-                    result.text
+                    result.text.chars().count()
                 );
                 (result.text, true, Some(result.llm_ms))
             }
