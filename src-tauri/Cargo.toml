@@ -15,7 +15,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-opener = "2"
-tauri-plugin-global-shortcut = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-log = "2"
 serde = { version = "1", features = ["derive"] }
@@ -47,9 +46,16 @@ chrono = "0.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 transcribe-rs = { version = "0.3", features = ["whisper-metal"] }
+objc2 = "0.6"
 objc2-app-kit = "0.3"
 objc2-foundation = "0.3"
 macos-accessibility-client = "0.0.1"
+
+# Raw global key listener (bare-modifier + combo hotkeys; global-hotkey/rdev can't do
+# bare modifiers, and rdev's listen() crashes on real keypresses off the main thread —
+# see hotkey.rs doc comment).
+core-graphics = "0.25"
+core-foundation = "0.10"
 
 [dev-dependencies]
 hound = "3.5"

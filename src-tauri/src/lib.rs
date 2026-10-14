@@ -1,6 +1,7 @@
-mod audio;
+pub mod audio;
 mod cleanup;
 mod context;
+mod hotkey;
 mod inject;
 mod pipeline;
 mod settings;
@@ -10,7 +11,6 @@ mod stt;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 use audio::Recorder;
 use inject::Injector;
@@ -110,6 +110,62 @@ async fn ollama_status(app: AppHandle) -> cleanup::OllamaStatus {
     cleanup::ollama_status(&settings).await
 }
 
+// AVFoundation is not linked by default; pull it in so AVCaptureDevice resolves.
+#[cfg(target_os = "macos")]
+#[link(name = "AVFoundation", kind = "framework")]
+extern "C" {}
+
+#[cfg(target_os = "macos")]
+fn mic_auth_status_code() -> i64 {
+    use objc2::msg_send;
+    use objc2::runtime::AnyClass;
+    use objc2_foundation::NSString;
+    unsafe {
+        let Some(cls) = AnyClass::get(c"AVCaptureDevice") else {
+            return 0;
+        };
+        // AVMediaTypeAudio = "soun"
+        let media_type = NSString::from_str("soun");
+        msg_send![cls, authorizationStatusForMediaType: &*media_type]
+    }
+}
+
+#[tauri::command]
+async fn warm_ollama(app: AppHandle) {
+    let settings = app.state::<SettingsStore>().get();
+    if settings.cleanup_level != "none" {
+        cleanup::warm_model(&settings).await;
+    }
+}
+
+#[tauri::command]
+fn check_microphone() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        match mic_auth_status_code() {
+            3 => "granted",
+            2 => "denied",
+            1 => "restricted",
+            _ => "not_determined",
+        }
+        .to_string()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "granted".to_string()
+    }
+}
+
+#[tauri::command]
+fn open_system_settings_microphone() {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+            .spawn();
+    }
+}
+
 #[tauri::command]
 fn check_accessibility() -> bool {
     #[cfg(target_os = "macos")]
@@ -173,13 +229,10 @@ fn get_achievements(
 }
 
 fn register_hotkey(app: &AppHandle, binding: &str) -> anyhow::Result<()> {
-    let shortcuts = app.global_shortcut();
-    shortcuts.unregister_all()?;
-    let shortcut: Shortcut = binding
-        .parse()
-        .map_err(|e| anyhow::anyhow!("invalid hotkey '{binding}': {e:?}"))?;
-    shortcuts.register(shortcut)?;
-    log::info!("hotkey registered: {binding}");
+    let target = hotkey::parse_hotkey(binding).map_err(|e| anyhow::anyhow!("invalid hotkey '{binding}': {e}"))?;
+    let shared = app.state::<hotkey::SharedHotkeyTarget>();
+    hotkey::set_target(&shared, target);
+    log::info!("hotkey set: {binding}");
     Ok(())
 }
 
@@ -232,15 +285,6 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    let pressed = event.state() == ShortcutState::Pressed;
-                    let pipeline = app.state::<Pipeline>();
-                    pipeline.on_hotkey(app, pressed);
-                })
-                .build(),
-        )
         .on_window_event(|window, event| {
             // Closing settings hides it; the app stays alive (and in the Dock,
             // since a full menu bar can push the tray icon off-screen).
@@ -259,6 +303,9 @@ pub fn run() {
             get_autostart,
             set_autostart,
             ollama_status,
+            warm_ollama,
+            check_microphone,
+            open_system_settings_microphone,
             check_accessibility,
             request_accessibility,
             mic_level,
@@ -287,18 +334,37 @@ pub fn run() {
             app.manage(Pipeline::new());
 
             setup_tray(&handle)?;
-            register_hotkey(&handle, &hotkey)?;
+            let initial_hotkey = hotkey::parse_hotkey(&hotkey).unwrap_or_else(|e| {
+                log::error!("invalid stored hotkey '{hotkey}': {e}, falling back to alt+space");
+                hotkey::parse_hotkey("alt+space").expect("default hotkey must parse")
+            });
+            app.manage(hotkey::spawn(handle.clone(), initial_hotkey));
 
-            // Download/load the STT model and warm the Ollama model in the background.
+            // Download/load the STT model, warm Ollama, then keep both hot.
             let bg = handle.clone();
             tauri::async_runtime::spawn(async move {
                 let model_id = bg.state::<SettingsStore>().get().stt_model_id;
                 if let Err(e) = stt::ensure_model_ready(bg.clone(), &model_id).await {
                     log::error!("STT model setup failed: {e}");
+                    return;
                 }
                 let settings = bg.state::<SettingsStore>().get();
-                if settings.cleanup_enabled {
+                if settings.cleanup_level != "none" {
                     cleanup::warm_model(&settings).await;
+                }
+                // Every 3 minutes: run a silent STT inference to prevent macOS
+                // from paging the model weights out under memory pressure, and
+                // re-warm Ollama in case it was restarted since startup.
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(180)).await;
+                    let bg2 = bg.clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        bg2.state::<Transcriber>().keepalive();
+                    });
+                    let settings = bg.state::<SettingsStore>().get();
+                    if settings.cleanup_level != "none" {
+                        cleanup::warm_model(&settings).await;
+                    }
                 }
             });
 
@@ -311,6 +377,9 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {
                 show_settings_window(app);
+            }
+            if let tauri::RunEvent::Exit = event {
+                app.state::<Transcriber>().unload();
             }
             let _ = (app, &event);
         });

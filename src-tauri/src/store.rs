@@ -73,6 +73,25 @@ const ACHIEVEMENTS: &[AchievementDef] = &[
     AchievementDef { id: "marathon", title: "Marathon", description: "A single dictation over 60 seconds." },
     AchievementDef { id: "everywhere", title: "Everywhere", description: "Dictate into 5 different apps." },
     AchievementDef { id: "centurion", title: "Centurion", description: "Complete 100 dictations." },
+    // Streak milestones
+    AchievementDef { id: "streak_14", title: "On a Roll", description: "Dictate 14 days in a row." },
+    AchievementDef { id: "streak_30", title: "Creature of Habit", description: "Dictate 30 days in a row." },
+    // Volume milestones
+    AchievementDef { id: "dictation_machine", title: "Dictation Machine", description: "Complete 1,000 dictations." },
+    AchievementDef { id: "half_million", title: "Half Million", description: "Dictate 500,000 words." },
+    // Time saved
+    AchievementDef { id: "time_saver", title: "Time Saver", description: "Save 60 minutes vs. typing." },
+    AchievementDef { id: "day_saver", title: "Day Saver", description: "Save 8 hours vs. typing." },
+    // App diversity
+    AchievementDef { id: "world_tour", title: "World Tour", description: "Dictate into 10 different apps." },
+    // Speed
+    AchievementDef { id: "speed_demon", title: "Speed Demon", description: "Average over 200 wpm in a dictation of 15+ seconds." },
+    AchievementDef { id: "quick_draw", title: "Quick Draw", description: "STT completes in under 500 ms on a 10+ word dictation." },
+    // Time of day
+    AchievementDef { id: "night_owl", title: "Night Owl", description: "Dictate between midnight and 4 am." },
+    AchievementDef { id: "early_bird", title: "Early Bird", description: "Dictate between 4 am and 6 am." },
+    // Quality
+    AchievementDef { id: "no_edits", title: "No Edits Needed", description: "AI cleanup applied but changed nothing (10+ words)." },
 ];
 
 impl Store {
@@ -289,6 +308,35 @@ impl Store {
             [],
             |r| r.get(0),
         )?;
+        let speed_demon: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM history WHERE audio_seconds >= 15
+                AND words / (audio_seconds / 60.0) > 200)",
+            [],
+            |r| r.get(0),
+        )?;
+        let quick_draw: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM history WHERE words >= 10 AND stt_ms < 500)",
+            [],
+            |r| r.get(0),
+        )?;
+        let night_owl: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM history
+                WHERE CAST(strftime('%H', ts, 'localtime') AS INTEGER) BETWEEN 0 AND 3)",
+            [],
+            |r| r.get(0),
+        )?;
+        let early_bird: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM history
+                WHERE CAST(strftime('%H', ts, 'localtime') AS INTEGER) BETWEEN 4 AND 5)",
+            [],
+            |r| r.get(0),
+        )?;
+        let no_edits: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM history
+                WHERE cleaned = 1 AND raw_text = final_text AND words >= 10)",
+            [],
+            |r| r.get(0),
+        )?;
 
         let earned = |id: &str| -> bool {
             match id {
@@ -302,6 +350,18 @@ impl Store {
                 "marathon" => marathon,
                 "everywhere" => stats.distinct_apps >= 5,
                 "centurion" => stats.total_dictations >= 100,
+                "streak_14" => stats.streak_days >= 14,
+                "streak_30" => stats.streak_days >= 30,
+                "dictation_machine" => stats.total_dictations >= 1_000,
+                "half_million" => stats.total_words >= 500_000,
+                "time_saver" => stats.minutes_saved >= 60.0,
+                "day_saver" => stats.minutes_saved >= 480.0,
+                "world_tour" => stats.distinct_apps >= 10,
+                "speed_demon" => speed_demon,
+                "quick_draw" => quick_draw,
+                "night_owl" => night_owl,
+                "early_bird" => early_bird,
+                "no_edits" => no_edits,
                 _ => false,
             }
         };

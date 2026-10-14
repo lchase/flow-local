@@ -10,8 +10,29 @@ use transcribe_rs::{
         parakeet::{ParakeetModel, ParakeetParams, TimestampGranularity},
         Quantization,
     },
+    set_ort_accelerator,
+    transcriber::{Transcriber as ChunkTranscriber, VadChunked, VadChunkedConfig},
+    vad::{EnergyVad, SmoothedVad},
     whisper_cpp::{WhisperEngine, WhisperInferenceParams},
+    OrtAccelerator, TranscribeOptions,
 };
+
+/// Default RMS threshold for the inner `EnergyVad`, used for any device with
+/// no per-device calibration yet (see `AppSettings::mic_calibration`).
+/// ponytail: starting guess, not derived; raise if background noise triggers
+/// false speech onsets, lower if soft speech gets missed.
+pub const STREAMING_VAD_RMS_THRESHOLD: f32 = 0.02;
+
+/// Build a fresh per-recording `VadChunked` session: `SmoothedVad` wrapping
+/// `EnergyVad`, tuned per the streaming ASR integration design (frame_size
+/// 480 = 30ms @16kHz; onset_frames=2, hangover_frames=15, prefill_frames=15).
+/// `threshold` is per-device calibrated RMS onset (see
+/// `AppSettings::mic_calibration`), falling back to `STREAMING_VAD_RMS_THRESHOLD`.
+pub fn new_streaming_vad(threshold: f32) -> VadChunked {
+    let inner = EnergyVad::new(480, threshold);
+    let vad = SmoothedVad::new(Box::new(inner), 15, 15, 2);
+    VadChunked::new(Box::new(vad), VadChunkedConfig::default(), TranscribeOptions::default())
+}
 
 #[derive(Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -96,7 +117,21 @@ pub struct Transcriber {
 }
 
 impl Transcriber {
+    /// Drop the loaded model. Called on app exit: whisper.cpp's Metal device asserts
+    /// (`[rsets->data count] == 0`) in a static destructor if a context is still alive
+    /// when `exit()` runs, which showed up as an "unexpected error" dialog on quit.
+    pub fn unload(&self) {
+        if let Ok(mut engine) = self.engine.lock() {
+            engine.take();
+        }
+    }
+
     pub fn new() -> Self {
+        // Pin CPU-only explicitly: upstream benchmarks on int8 Parakeet (our default) show
+        // CoreML Auto is 3.4-6.9x slower than CPU (transcribe-rs issue #86), and the
+        // `ort-coreml` feature isn't even compiled in — this just forecloses someone flipping
+        // it on later without re-checking.
+        set_ort_accelerator(OrtAccelerator::CpuOnly);
         Self {
             engine: Mutex::new(None),
         }
@@ -132,6 +167,22 @@ impl Transcriber {
         Ok(())
     }
 
+    /// Run a short silent inference to keep model memory pages hot.
+    /// Uses try_lock so a real transcription in progress is never delayed.
+    pub fn keepalive(&self) {
+        let Ok(mut guard) = self.engine.try_lock() else { return };
+        let Some((_, engine)) = guard.as_mut() else { return };
+        let silence = vec![0.0f32; 8000]; // 0.5 s of silence at 16 kHz
+        let _ = match engine {
+            LoadedEngine::Parakeet(p) => {
+                p.transcribe_with(&silence, &ParakeetParams::default()).map(|_| ())
+            }
+            LoadedEngine::Whisper(w) => {
+                w.transcribe_with(&silence, &WhisperInferenceParams::default()).map(|_| ())
+            }
+        };
+    }
+
     /// Transcribe 16kHz mono f32 samples. Returns (text, elapsed_ms).
     pub fn transcribe(&self, audio: &[f32]) -> Result<(String, u128)> {
         let mut guard = self.engine.lock().unwrap();
@@ -159,6 +210,43 @@ impl Transcriber {
             }
         };
         Ok((text.trim().to_string(), started.elapsed().as_millis()))
+    }
+
+    /// Feed a chunk of 16kHz mono f32 samples into a live streaming session.
+    /// Internally chunk-transcribes on speech/silence boundaries; most of a
+    /// long recording is already transcribed by the time `finish_streaming`
+    /// runs, which is what buys the tail-latency win.
+    pub fn feed_streaming(&self, vad: &mut VadChunked, audio: &[f32]) -> Result<()> {
+        if audio.is_empty() {
+            return Ok(());
+        }
+        let mut guard = self.engine.lock().unwrap();
+        let (_, engine) = guard
+            .as_mut()
+            .ok_or_else(|| anyhow!("STT model not loaded yet"))?;
+        match engine {
+            LoadedEngine::Parakeet(m) => vad.feed(m, audio),
+            LoadedEngine::Whisper(m) => vad.feed(m, audio),
+        }
+        .map_err(|e| anyhow!("streaming feed failed: {e}"))?;
+        Ok(())
+    }
+
+    /// Feed the final tail and merge all chunk results into one transcript.
+    /// Returns (text, elapsed_ms) — elapsed covers only this call, since most
+    /// of the audio was already transcribed by prior `feed_streaming` calls.
+    pub fn finish_streaming(&self, vad: &mut VadChunked) -> Result<(String, u128)> {
+        let mut guard = self.engine.lock().unwrap();
+        let (_, engine) = guard
+            .as_mut()
+            .ok_or_else(|| anyhow!("STT model not loaded yet"))?;
+        let started = std::time::Instant::now();
+        let result = match engine {
+            LoadedEngine::Parakeet(m) => vad.finish(m),
+            LoadedEngine::Whisper(m) => vad.finish(m),
+        }
+        .map_err(|e| anyhow!("streaming finish failed: {e}"))?;
+        Ok((result.text.trim().to_string(), started.elapsed().as_millis()))
     }
 }
 

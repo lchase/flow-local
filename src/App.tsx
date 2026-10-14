@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
@@ -24,6 +24,7 @@ export interface Shared {
   progress: DownloadProgress | null;
   ollama: OllamaStatus | null;
   accessibility: boolean | null;
+  microphone: string | null;
   pipeline: PipelineEvent;
   lastResult: DictationResult | null;
   refreshStatus: () => void;
@@ -117,20 +118,52 @@ export default function App() {
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [ollama, setOllama] = useState<OllamaStatus | null>(null);
   const [accessibility, setAccessibility] = useState<boolean | null>(null);
+  const [microphone, setMicrophone] = useState<string | null>(null);
   const [pipeline, setPipeline] = useState<PipelineEvent>({ state: "idle", detail: null });
   const [lastResult, setLastResult] = useState<DictationResult | null>(null);
   const [toast, setToast] = useState<Achievement | null>(null);
 
+  const refreshPermissions = useCallback(async () => {
+    try {
+      const [acc, mic] = await Promise.all([
+        invoke<boolean>("check_accessibility"),
+        invoke<string>("check_microphone"),
+      ]);
+      setAccessibility(acc);
+      setMicrophone(mic);
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  const prevOllamaReachable = useRef<boolean | null>(null);
+  const refreshOllama = useCallback(async () => {
+    try {
+      const ol = await invoke<OllamaStatus>("ollama_status");
+      setOllama(ol);
+      // Re-warm model if Ollama just came back online (restarted after sleep etc.)
+      if (ol.reachable && ol.configured_model_available && prevOllamaReachable.current === false) {
+        invoke("warm_ollama").catch(() => {});
+      }
+      prevOllamaReachable.current = ol.reachable;
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  // Called once on mount and when the STT model finishes loading.
   const refreshStatus = useCallback(async () => {
     try {
-      const [stt, ol, acc] = await Promise.all([
+      const [stt, ol, acc, mic] = await Promise.all([
         invoke<SttModelStatus>("stt_model_status"),
         invoke<OllamaStatus>("ollama_status"),
         invoke<boolean>("check_accessibility"),
+        invoke<string>("check_microphone"),
       ]);
       setSttStatus(stt);
       setOllama(ol);
       setAccessibility(acc);
+      setMicrophone(mic);
     } catch (e) {
       console.error(e);
     }
@@ -139,7 +172,15 @@ export default function App() {
   useEffect(() => {
     invoke<AppSettings>("get_settings").then(setSettings);
     refreshStatus();
-    const poll = setInterval(refreshStatus, 5000);
+
+    // Permissions only change when the user visits System Settings;
+    // re-check when the window comes back into focus.
+    const onFocus = () => refreshPermissions();
+    window.addEventListener("focus", onFocus);
+
+    // Ollama can start/stop any time — poll at a relaxed cadence.
+    const ollamaPoll = setInterval(refreshOllama, 15_000);
+
     const unlistens = [
       listen<DownloadProgress>("stt-model-progress", (e) => {
         setProgress(e.payload);
@@ -155,7 +196,8 @@ export default function App() {
       }),
     ];
     return () => {
-      clearInterval(poll);
+      window.removeEventListener("focus", onFocus);
+      clearInterval(ollamaPoll);
       unlistens.forEach((u) => u.then((fn) => fn()));
     };
   }, [refreshStatus]);
@@ -174,6 +216,7 @@ export default function App() {
     progress,
     ollama,
     accessibility,
+    microphone,
     pipeline,
     lastResult,
     refreshStatus,
@@ -184,13 +227,22 @@ export default function App() {
       {/* Sidebar */}
       <aside className="relative z-10 flex w-56 shrink-0 flex-col border-r border-(--color-line) bg-(--color-card)/70 backdrop-blur">
         <div className="flex items-center gap-2.5 px-5 pt-6 pb-7">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-(--color-ink) text-(--color-paper)">
-            <svg viewBox="0 0 16 16" className="h-4 w-4" fill="currentColor">
-              <rect x="6" y="1.5" width="4" height="8" rx="2" />
-              <path d="M3.5 7.5a4.5 4.5 0 0 0 9 0h-1.3a3.2 3.2 0 0 1-6.4 0H3.5z" />
-              <rect x="7.3" y="12" width="1.4" height="2.5" rx="0.7" />
-            </svg>
-          </div>
+          {/* Same artwork as the app icon (src-tauri/icons/icon.png). */}
+          <svg viewBox="0 0 1024 1024" className="h-8 w-8" role="img" aria-label="Flow Local">
+            <rect width="1024" height="1024" rx="230" fill="#1B1F3A" />
+            <rect x="362" y="180" width="300" height="460" rx="150" fill="none" stroke="#fff" strokeWidth="44" />
+            <g fill="#5EE0C8">
+              <rect x="418" y="350" width="28" height="120" rx="14" />
+              <rect x="458" y="300" width="28" height="220" rx="14" />
+              <rect x="498" y="260" width="28" height="300" rx="14" />
+              <rect x="538" y="320" width="28" height="180" rx="14" />
+              <rect x="578" y="365" width="28" height="90" rx="14" />
+            </g>
+            <g fill="none" stroke="#fff" strokeWidth="44" strokeLinecap="round">
+              <path d="M262 560A250 250 0 0 0 762 560" />
+              <path d="M512 810v70M400 880h224" />
+            </g>
+          </svg>
           <span className="font-display text-[17px] font-semibold tracking-tight">Flow Local</span>
         </div>
 

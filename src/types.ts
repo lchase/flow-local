@@ -9,12 +9,15 @@ export interface AppSettings {
   hotkey: string;
   activation_mode: "push_to_talk" | "toggle";
   stt_model_id: string;
-  cleanup_enabled: boolean;
+  cleanup_level: "none" | "light" | "medium" | "high";
+  clipboard_substitution_enabled: boolean;
   ollama_url: string;
   ollama_model: string;
   dictionary: string[];
   app_profiles: AppProfile[];
   history_retention: "forever" | "24h" | "never";
+  /** Per-device streaming-VAD RMS threshold, keyed by cpal device name. Not user-facing — no Settings control. */
+  mic_calibration: Record<string, number>;
 }
 
 export interface HistoryEntry {

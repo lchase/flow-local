@@ -1,9 +1,15 @@
+use std::sync::LazyLock;
+
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::context::FrontmostApp;
 use crate::settings::AppSettings;
+
+/// Shared pooled client: one TCP connection reused across cleanup/warm/status calls
+/// instead of a fresh connection per request.
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
 const BASE_PROMPT: &str = "You are a dictation post-processor. The user dictated text by voice; \
 you receive the raw speech-to-text transcript. Rewrite it as clean written text:\n\
@@ -107,6 +113,22 @@ pub fn mode_for_app(settings: &AppSettings, app: Option<&FrontmostApp>) -> Strin
     builtin_mode(&app.bundle_id).unwrap_or("prose").to_string()
 }
 
+fn level_fragment(level: &str) -> &'static str {
+    match level {
+        "medium" => {
+            "\n\nAdditionally, improve clarity and conciseness: tighten wordy phrasing, \
+combine fragmented sentences where it reads naturally, and remove obvious redundancy. \
+Keep the speaker's intent and key phrasing intact."
+        }
+        "high" => {
+            "\n\nAdditionally, rewrite for brevity and polish: restructure sentences for flow, \
+eliminate all redundancy, and tighten phrasing aggressively. \
+A clean, polished result takes priority over preserving the speaker's exact wording."
+        }
+        _ => "", // "light" uses only the base prompt
+    }
+}
+
 pub fn build_system_prompt(settings: &AppSettings, app: Option<&FrontmostApp>) -> String {
     let mut prompt = String::from(BASE_PROMPT);
     if !settings.dictionary.is_empty() {
@@ -118,6 +140,7 @@ when they appear: {}.",
     }
     let mode = mode_for_app(settings, app);
     prompt.push_str(mode_fragment(&mode));
+    prompt.push_str(level_fragment(&settings.cleanup_level));
     if let Some(app) = app {
         prompt.push_str(&format!(
             "\n\nThe text will be inserted into the application \"{}\".",
@@ -145,8 +168,7 @@ pub async fn clean_transcript(
     });
 
     let started = std::time::Instant::now();
-    let client = reqwest::Client::new();
-    let resp = client
+    let resp = CLIENT
         .post(format!("{}/api/chat", settings.ollama_url.trim_end_matches('/')))
         .json(&body)
         .timeout(std::time::Duration::from_secs(60))
@@ -175,8 +197,7 @@ pub async fn clean_transcript(
 /// Preload the model so the first dictation doesn't pay the cold-start cost.
 pub async fn warm_model(settings: &AppSettings) {
     let body = json!({ "model": settings.ollama_model, "keep_alive": -1, "messages": [] });
-    let client = reqwest::Client::new();
-    let _ = client
+    let _ = CLIENT
         .post(format!("{}/api/chat", settings.ollama_url.trim_end_matches('/')))
         .json(&body)
         .timeout(std::time::Duration::from_secs(120))
@@ -201,8 +222,7 @@ pub async fn ollama_status(settings: &AppSettings) -> OllamaStatus {
         name: String,
     }
 
-    let client = reqwest::Client::new();
-    let resp = client
+    let resp = CLIENT
         .get(format!("{}/api/tags", settings.ollama_url.trim_end_matches('/')))
         .timeout(std::time::Duration::from_secs(3))
         .send()

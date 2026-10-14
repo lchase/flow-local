@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -15,14 +16,19 @@ pub struct AppProfile {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
-    /// tauri-plugin-global-shortcut binding string.
+    /// Hotkey binding string parsed by `hotkey::parse_hotkey` — either a bare modifier
+    /// ("alt") or a "mod[+mod...]+key" combo ("alt+space"), key tokens matching browser
+    /// `KeyboardEvent.code`.
     pub hotkey: String,
     /// "push_to_talk" (hold) or "toggle" (press to start/stop).
     pub activation_mode: String,
     /// Which STT model to use (see stt::MODELS).
     pub stt_model_id: String,
-    /// Run the transcript through Ollama before pasting.
-    pub cleanup_enabled: bool,
+    /// How aggressively the LLM cleans up the transcript.
+    /// "none" | "light" | "medium" | "high"
+    pub cleanup_level: String,
+    /// Replace spoken "from the clipboard" / "in the clipboard" phrases with the clipboard contents.
+    pub clipboard_substitution_enabled: bool,
     pub ollama_url: String,
     pub ollama_model: String,
     /// Words/names the cleanup prompt should know how to spell.
@@ -32,6 +38,12 @@ pub struct AppSettings {
     pub app_profiles: Vec<AppProfile>,
     /// "forever" | "24h" | "never" — how long dictation history is kept.
     pub history_retention: String,
+    /// Per-device streaming-VAD RMS onset threshold, keyed by cpal device
+    /// name, measured from real speech RMS the first time an empty streaming
+    /// result on that device is recovered by whole-utterance fallback (see
+    /// `pipeline::process`). Devices with no entry use
+    /// `stt::STREAMING_VAD_RMS_THRESHOLD`. Not user-facing — no Settings UI.
+    pub mic_calibration: HashMap<String, f32>,
 }
 
 impl Default for AppSettings {
@@ -40,12 +52,14 @@ impl Default for AppSettings {
             hotkey: "alt+space".to_string(),
             activation_mode: "push_to_talk".to_string(),
             stt_model_id: crate::stt::DEFAULT_MODEL_ID.to_string(),
-            cleanup_enabled: true,
+            cleanup_level: "light".to_string(),
+            clipboard_substitution_enabled: true,
             ollama_url: "http://localhost:11434".to_string(),
             ollama_model: "qwen3:4b-instruct".to_string(),
             dictionary: Vec::new(),
             app_profiles: Vec::new(),
             history_retention: "forever".to_string(),
+            mic_calibration: HashMap::new(),
         }
     }
 }

@@ -42,12 +42,14 @@ export default function Overlay() {
   return (
     <div className="flex h-full w-full items-center justify-center">
       <div
-        className={`flex h-9 items-center gap-2 rounded-full px-4 text-xs font-medium shadow-lg backdrop-blur ${
-          isError ? "bg-red-900/90 text-red-100" : "bg-neutral-900/90 text-neutral-100"
+        className={`flex h-9 items-center gap-2 rounded-full px-4 text-xs font-medium backdrop-blur ring-1 shadow-[0_4px_24px_rgb(0_0_0/0.6)] ${
+          isError
+            ? "bg-red-900/90 text-red-100 ring-red-700/60"
+            : "bg-neutral-900/90 text-neutral-100 ring-white/20"
         }`}
       >
         {state.state === "recording" ? (
-          <div className="flex items-end gap-0.5">
+          <div className="flex items-center gap-0.5">
             {Array.from({ length: bars }).map((_, i) => {
               const intensity = Math.min(1, level * 14 * (1 - Math.abs(i - 2) * 0.18));
               return (

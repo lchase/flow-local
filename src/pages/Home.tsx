@@ -16,6 +16,17 @@ function fmtBytes(n: number) {
   return `${(n / 1024 / 1024).toFixed(0)} MB`;
 }
 
+function fmtTimeSaved(minutes: number) {
+  if (minutes < 1) return "< 1 min";
+  if (minutes < 60) return `${Math.round(minutes)} min`;
+  const hrs = Math.floor(minutes / 60);
+  const mins = Math.round(minutes % 60);
+  if (hrs < 24) return mins > 0 ? `${hrs} hr ${mins} min` : `${hrs} hr`;
+  const days = Math.floor(hrs / 24);
+  const remHrs = hrs % 24;
+  return remHrs > 0 ? `${days} day ${remHrs} hr` : `${days} days`;
+}
+
 function StatCard({
   title,
   value,
@@ -47,7 +58,7 @@ function Dot({ ok, pending }: { ok: boolean; pending?: boolean }) {
 }
 
 export default function Home({ shared }: { shared: Shared }) {
-  const { settings, sttStatus, progress, ollama, accessibility, lastResult, refreshStatus } = shared;
+  const { settings, sttStatus, progress, ollama, accessibility, microphone, lastResult, refreshStatus } = shared;
   const [stats, setStats] = useState<Stats | null>(null);
   const [achievements, setAchievements] = useState<Achievement[]>([]);
 
@@ -71,7 +82,6 @@ export default function Home({ shared }: { shared: Shared }) {
   const hotkeyParts = settings.hotkey.split("+");
 
   const words = stats?.total_words ?? 0;
-  const tweets = Math.max(1, Math.round(words / 10));
   const unlocked = achievements.filter((a) => a.unlocked_at);
 
   return (
@@ -92,16 +102,31 @@ export default function Home({ shared }: { shared: Shared }) {
 
       {/* Status line — only the things that need attention shout */}
       <div className="rise rise-1 flex flex-wrap gap-x-5 gap-y-2 text-xs text-(--color-ink-soft)">
-        <span className="flex items-center gap-1.5">
-          <Dot ok={modelReady} pending={!!downloading} />
-          {modelReady
-            ? `${sttStatus?.model_name}`
-            : downloading
-              ? progress!.stage === "downloading"
-                ? `Downloading model ${fmtBytes(progress!.downloaded_bytes)} / ${fmtBytes(progress!.total_bytes)}`
-                : `Model: ${progress!.stage}…`
-              : "Speech model not loaded"}
-        </span>
+        {downloading ? (
+          <div className="flex flex-col gap-1.5">
+            <span className="flex items-center gap-1.5">
+              <Dot ok={false} pending />
+              {progress!.stage === "downloading"
+                ? `Downloading · ${fmtBytes(progress!.downloaded_bytes)} / ${fmtBytes(progress!.total_bytes)}`
+                : `Model: ${progress!.stage}…`}
+            </span>
+            <div className="ml-3.5 h-1 w-40 overflow-hidden rounded-full bg-(--color-line)">
+              {progress!.stage === "downloading" && progress!.total_bytes > 0 ? (
+                <div
+                  className="h-full rounded-full bg-(--color-accent) transition-all duration-200 ease-out"
+                  style={{ width: `${Math.min(100, Math.round((progress!.downloaded_bytes / progress!.total_bytes) * 100))}%` }}
+                />
+              ) : (
+                <div className="h-full w-full animate-pulse rounded-full bg-(--color-accent)" />
+              )}
+            </div>
+          </div>
+        ) : (
+          <span className="flex items-center gap-1.5">
+            <Dot ok={modelReady} />
+            {modelReady ? sttStatus?.model_name : "Speech model not loaded"}
+          </span>
+        )}
         <span className="flex items-center gap-1.5">
           <Dot ok={ollamaReady} />
           {!ollama?.reachable
@@ -123,6 +148,21 @@ export default function Home({ shared }: { shared: Shared }) {
             </button>
           )}
         </span>
+        <span className="flex items-center gap-1.5">
+          <Dot ok={microphone === "granted"} pending={microphone === "not_determined"} />
+          {microphone === "granted"
+            ? "Microphone granted"
+            : microphone === "denied" || microphone === "restricted"
+              ? (
+                <button
+                  className="underline decoration-dotted underline-offset-2 hover:text-(--color-ink)"
+                  onClick={() => invoke("open_system_settings_microphone")}
+                >
+                  Microphone denied — open System Settings
+                </button>
+              )
+              : "Microphone — will ask on first dictation"}
+        </span>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
@@ -140,9 +180,9 @@ export default function Home({ shared }: { shared: Shared }) {
         />
         <StatCard
           delay="rise-3"
-          title="Total words dictated"
-          value={`${words.toLocaleString()} ${words > 0 ? "🔥" : ""}`}
-          quip={words > 0 ? `That's about ${tweets} tweet${tweets === 1 ? "" : "s"}` : "Your first words await"}
+          title="Time saved"
+          value={(stats?.minutes_saved ?? 0) > 0 ? fmtTimeSaved(stats!.minutes_saved) : "—"}
+          quip={words > 0 ? `${words.toLocaleString()} words vs. typing at 45 WPM` : "Your first words await"}
         />
       </div>
 
@@ -161,12 +201,16 @@ export default function Home({ shared }: { shared: Shared }) {
       )}
 
       <section className="rise rise-4 space-y-3">
-        <h2 className="font-display text-sm font-semibold">
-          Achievements{" "}
-          <span className="font-sans text-xs font-normal text-(--color-ink-soft)">
-            {unlocked.length} of {achievements.length}
-          </span>
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="font-display text-sm font-semibold">Achievements</h2>
+          <span className="text-xs text-(--color-ink-soft)">{unlocked.length} / {achievements.length}</span>
+        </div>
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-(--color-line)">
+          <div
+            className="h-full rounded-full bg-amber-400 transition-all duration-500"
+            style={{ width: achievements.length ? `${(unlocked.length / achievements.length) * 100}%` : "0%" }}
+          />
+        </div>
         <div className="grid grid-cols-2 gap-2">
           {achievements.map((a) => (
             <div

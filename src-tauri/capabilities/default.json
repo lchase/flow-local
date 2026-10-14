@@ -8,7 +8,6 @@
     "core:event:default",
     "core:window:default",
     "opener:default",
-    "global-shortcut:default",
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-text",
     "log:default"
