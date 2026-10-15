@@ -1,0 +1,53 @@
+name: PR check
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # macOS-only app (NSWorkspace, Metal, enigo), so it only builds on macOS.
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # whisper.cpp build prerequisite (usually preinstalled on the runner).
+      - run: brew list cmake >/dev/null 2>&1 || brew install cmake
+
+      - run: pnpm install --frozen-lockfile
+
+      # tsc + vite build. Also produces dist/, which tauri::generate_context! needs.
+      - run: pnpm build
+
+      - name: Rust check
+        working-directory: src-tauri
+        # No --all-targets: examples/ holds throwaway benches that can go stale.
+        run: cargo check --locked --lib --bins --tests
+
+      # The STT e2e tests are #[ignore]d (need a downloaded model), so this is unit tests only.
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked --lib --bins --tests
